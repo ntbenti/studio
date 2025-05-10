@@ -1,10 +1,9 @@
 export type GameStateType =
-  | "IDLE"          // Waiting for the next round to start betting
   | "BETTING"       // Betting window is open
   | "STARTING_ROUND"// Bets are locked, round is about to start
   | "RUNNING"       // Multiplier is increasing
   | "CRASHED"       // Multiplier has crashed
-  | "ENDED";        // Round results processed, preparing for IDLE
+  | "ENDED";        // Round results processed, preparing for new round
 
 export interface Bet {
   amount: number;
@@ -22,4 +21,15 @@ export interface GameHistoryItem {
 export interface RoundData {
   finalMultiplier: number;
   timestamp: string;
+}
+
+export interface UserStats {
+  gamesPlayed: number;
+  totalWagered: number;
+  totalWon: number;
+  netProfit: number;
+  successfulCashouts: number;
+  totalCashedOutMultiplierValue: number;
+  avgCashoutMultiplier: number;
+  lastPlayed: string; // ISO timestamp
 }

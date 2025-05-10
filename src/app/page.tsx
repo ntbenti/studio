@@ -1,3 +1,4 @@
+// src/app/page.tsx
 "use client";
 
 import { useState } from 'react';
@@ -8,11 +9,11 @@ import { BettingInterface } from '@/components/game/BettingInterface';
 import { CashOutButton } from '@/components/game/CashOutButton';
 import { GameHistory } from '@/components/game/GameHistory';
 import { useGameLogic } from '@/hooks/useGameLogic';
-import { Separator } from '@/components/ui/separator';
+// import { Separator } from '@/components/ui/separator'; // No longer used
 
 export default function CryptoCrashPage() {
   const [isWalletConnected, setIsWalletConnected] = useState(false);
-  // const [userWalletAddress, setUserWalletAddress] = useState<string | undefined>();
+  const [userWalletAddress, setUserWalletAddress] = useState<string | undefined>();
 
   const {
     gameState,
@@ -30,11 +31,11 @@ export default function CryptoCrashPage() {
     canCashOut,
     isProcessingCashOut,
     gameHistory,
-  } = useGameLogic();
+  } = useGameLogic(userWalletAddress); // Pass wallet address to the hook
 
   const handleWalletConnectionChange = (connected: boolean, address?: string) => {
     setIsWalletConnected(connected);
-    // setUserWalletAddress(address);
+    setUserWalletAddress(address);
   };
 
   return (

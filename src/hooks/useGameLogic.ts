@@ -1,10 +1,12 @@
-
+// src/hooks/useGameLogic.ts
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { GameStateType, Bet, GameHistoryItem, RoundData } from '@/lib/types';
+import type { GameStateType, Bet, GameHistoryItem, RoundData, UserStats } from '@/lib/types';
 import { predictCrashPoint, type PredictCrashPointInput } from '@/ai/flows/crash-predictor';
 import { useToast } from '@/hooks/use-toast';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, updateDoc, setDoc, runTransaction } from 'firebase/firestore';
 
 const BETTING_DURATION = 7; // seconds
 const ROUND_END_PAUSE = 3; // seconds after crash before new round
@@ -15,16 +17,27 @@ const ACCELERATED_MULTIPLIER_SPEED = 0.05; // per interval after threshold
 const FASTER_ACCELERATION_THRESHOLD = 10;
 const FASTER_MULTIPLIER_SPEED = 0.15;
 
+const defaultUserStats: UserStats = {
+  gamesPlayed: 0,
+  totalWagered: 0,
+  totalWon: 0,
+  netProfit: 0,
+  successfulCashouts: 0,
+  totalCashedOutMultiplierValue: 0,
+  avgCashoutMultiplier: 0,
+  lastPlayed: new Date().toISOString(),
+};
 
-export function useGameLogic() {
-  const [gameState, setGameState] = useState<GameStateType>("BETTING"); // Initialize directly to BETTING
+
+export function useGameLogic(walletAddress?: string) {
+  const [gameState, setGameState] = useState<GameStateType>("BETTING");
   const [currentMultiplier, setCurrentMultiplier] = useState(1.0);
-  const [timer, setTimer] = useState(BETTING_DURATION); // Initialize timer for BETTING state
+  const [timer, setTimer] = useState(BETTING_DURATION);
   const [predictedCrashPoint, setPredictedCrashPoint] = useState<number | null>(null);
   
   const [userBet, setUserBet] = useState<Bet | null>(null);
   const [betAmountInput, setBetAmountInput] = useState<string>("");
-  const [balance, setBalance] = useState(10.00); // Mock balance
+  const [balance, setBalance] = useState(10.00); 
   
   const [gameHistory, setGameHistory] = useState<GameHistoryItem[]>([]);
   const [roundHistoryForAI, setRoundHistoryForAI] = useState<RoundData[]>([]);
@@ -41,20 +54,18 @@ export function useGameLogic() {
     setCurrentMultiplier(1.0);
     setPredictedCrashPoint(null);
     setUserBet(null);
-    // betAmountInput is kept for user convenience
     setIsProcessingBet(false);
     setIsProcessingCashOut(false);
     setHasPlacedBetThisRound(false);
-    setGameState("BETTING"); // Go directly to betting
-    setTimer(BETTING_DURATION); // Set timer for betting
+    setGameState("BETTING");
+    setTimer(BETTING_DURATION);
   }, []);
 
-  // Game State Machine
+  // Game State Machine & Stats Update
   useEffect(() => {
     if (gameLoopRef.current) clearTimeout(gameLoopRef.current);
 
     switch (gameState) {
-      // IDLE state removed
       case "BETTING":
         if (timer > 0) {
           gameLoopRef.current = setTimeout(() => setTimer(t => t - 1), 1000);
@@ -70,7 +81,7 @@ export function useGameLogic() {
               currentPot: (userBet?.amount || 0) * 5, 
               averageCashoutMultiplier: gameHistory.length > 0 
                 ? gameHistory.reduce((acc, item) => acc + item.crashPoint, 0) / gameHistory.length 
-                : 2.0, // Default if no history
+                : 2.0,
             };
             const predictionResult = await predictCrashPoint(aiInput);
             if (predictionResult.predictedCrashPoint > 1.0) {
@@ -95,23 +106,22 @@ export function useGameLogic() {
         // Multiplier increase is handled in its own useEffect
         break;
       case "CRASHED":
-        gameLoopRef.current = setTimeout(() => {
-          const finalCrashPoint = predictedCrashPoint || currentMultiplier; // Should always be predictedCrashPoint
-          
-          let profit = 0;
+        gameLoopRef.current = setTimeout(async () => {
+          const finalCrashPoint = predictedCrashPoint || currentMultiplier;
+          let profitThisRound = 0;
           let currentBetForHistory: Bet | undefined = undefined;
+          let cashedOutSuccessfullyThisRound = false;
+          let cashedOutAtMultiplierThisRound = 0;
 
-          if (userBet && hasPlacedBetThisRound) { // Ensure bet was for the current round
-            currentBetForHistory = { ...userBet }; // Copy for history
-            if (userBet.cashedOutAt && userBet.cashedOutAt <= finalCrashPoint) { 
-              // User cashed out successfully
-              profit = (userBet.amount * userBet.cashedOutAt) - userBet.amount;
-              // Balance was already reduced at bet placement. Add the full payout.
+          if (userBet && hasPlacedBetThisRound) {
+            currentBetForHistory = { ...userBet };
+            if (userBet.cashedOutAt && userBet.cashedOutAt <= finalCrashPoint) {
+              profitThisRound = (userBet.amount * userBet.cashedOutAt) - userBet.amount;
               setBalance(prev => parseFloat((prev + (userBet.amount * userBet.cashedOutAt!)).toFixed(2)));
-            } else { 
-              // User didn't cash out or cashed out too late / bet lost
-              profit = -userBet.amount;
-              // Balance already reflects the loss of the stake. No further adjustment needed.
+              cashedOutSuccessfullyThisRound = true;
+              cashedOutAtMultiplierThisRound = userBet.cashedOutAt;
+            } else {
+              profitThisRound = -userBet.amount;
             }
           }
           
@@ -119,12 +129,65 @@ export function useGameLogic() {
             id: crypto.randomUUID(),
             crashPoint: finalCrashPoint,
             bet: currentBetForHistory, 
-            profit: profit,
+            profit: profitThisRound,
             timestamp: new Date().toISOString(),
           };
           
           setGameHistory(prev => [newHistoryItem, ...prev.slice(0, 19)]);
           setRoundHistoryForAI(prev => [{ finalMultiplier: newHistoryItem.crashPoint, timestamp: newHistoryItem.timestamp }, ...prev.slice(0,19)]);
+
+          // Update Firestore stats
+          if (walletAddress && currentBetForHistory) { // Only update if there was a bet
+            const userStatsRef = doc(db, 'users', walletAddress);
+            try {
+              await runTransaction(db, async (transaction) => {
+                const userStatsSnap = await transaction.get(userStatsRef);
+                let currentStats: UserStats;
+
+                if (!userStatsSnap.exists()) {
+                  // This case should ideally be handled by WalletConnectButton creating the doc.
+                  // If it still happens, initialize with default and apply this round's data.
+                  console.warn(`User doc ${walletAddress} not found, creating.`);
+                  currentStats = { ...defaultUserStats, lastPlayed: new Date().toISOString()};
+                } else {
+                  currentStats = userStatsSnap.data() as UserStats;
+                }
+                
+                const updatedGamesPlayed = currentStats.gamesPlayed + 1;
+                const updatedTotalWagered = currentStats.totalWagered + currentBetForHistory.amount;
+                
+                let updatedTotalWon = currentStats.totalWon;
+                let updatedSuccessfulCashouts = currentStats.successfulCashouts;
+                let updatedTotalCashedOutMultiplierValue = currentStats.totalCashedOutMultiplierValue;
+
+                if (cashedOutSuccessfullyThisRound) {
+                  updatedTotalWon += currentBetForHistory.amount * cashedOutAtMultiplierThisRound;
+                  updatedSuccessfulCashouts += 1;
+                  updatedTotalCashedOutMultiplierValue += cashedOutAtMultiplierThisRound;
+                }
+                
+                const updatedNetProfit = updatedTotalWon - updatedTotalWagered;
+                const updatedAvgCashoutMultiplier = updatedSuccessfulCashouts > 0 
+                  ? updatedTotalCashedOutMultiplierValue / updatedSuccessfulCashouts 
+                  : 0;
+
+                const newStats: UserStats = {
+                  gamesPlayed: updatedGamesPlayed,
+                  totalWagered: updatedTotalWagered,
+                  totalWon: updatedTotalWon,
+                  netProfit: updatedNetProfit,
+                  successfulCashouts: updatedSuccessfulCashouts,
+                  totalCashedOutMultiplierValue: updatedTotalCashedOutMultiplierValue,
+                  avgCashoutMultiplier: parseFloat(updatedAvgCashoutMultiplier.toFixed(2)),
+                  lastPlayed: new Date().toISOString(),
+                };
+                transaction.set(userStatsRef, newStats); // Use set to create if not exists or update if exists
+              });
+            } catch (error) {
+              console.error("Error updating user stats in transaction:", error);
+              toast({ title: "Stats Error", description: "Could not update player statistics.", variant: "destructive"});
+            }
+          }
           setGameState("ENDED");
         }, 1000); 
         break;
@@ -137,7 +200,7 @@ export function useGameLogic() {
     return () => {
       if (gameLoopRef.current) clearTimeout(gameLoopRef.current);
     };
-  }, [gameState, timer, userBet, predictedCrashPoint, currentMultiplier, resetForNewRound, roundHistoryForAI, toast, gameHistory, hasPlacedBetThisRound]);
+  }, [gameState, timer, userBet, predictedCrashPoint, currentMultiplier, resetForNewRound, roundHistoryForAI, toast, gameHistory, hasPlacedBetThisRound, walletAddress]);
 
   // Multiplier Increase Logic
   useEffect(() => {
@@ -203,7 +266,7 @@ export function useGameLogic() {
       const profit = parseFloat((winnings - cashedOutBet.amount).toFixed(2));
       
       setIsProcessingCashOut(false);
-      toast({ title: "Cashed Out!", description: `You secured ${currentMultiplier.toFixed(2)}x! Winnings: ${winnings} ETH (Profit: ${profit} ETH).`});
+      toast({ title: "Cashed Out!", description: `You secured ${currentMultiplier.toFixed(2)}x! Winnings: ${winnings.toFixed(2)} ETH (Profit: ${profit.toFixed(2)} ETH).`});
     }, 500);
   }, [gameState, userBet, currentMultiplier, isProcessingCashOut, toast, hasPlacedBetThisRound]);
 
@@ -228,4 +291,3 @@ export function useGameLogic() {
     gameHistory,
   };
 }
-
