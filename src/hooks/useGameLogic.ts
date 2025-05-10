@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { GameStateType, Bet, GameHistoryItem, RoundData } from '@/lib/types';
 import { predictCrashPoint, type PredictCrashPointInput } from '@/ai/flows/crash-predictor';
-import { useToast } from '@/components/ui/use-toast';
+import { useToast } from '@/hooks/use-toast';
 
 const IDLE_DURATION = 5; // seconds before betting starts
 const BETTING_DURATION = 7; // seconds

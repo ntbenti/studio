@@ -30,8 +30,8 @@ const PredictCrashPointOutputSchema = z.object({
   predictedCrashPoint: z
     .number()
     .describe(
-      'The predicted crash point multiplier.  This value should be greater than 1.0.
-      The prediction should add excitement and dynamic volatility to the game.'
+      `The predicted crash point multiplier. This value should be greater than 1.0.
+The prediction should add excitement and dynamic volatility to the game.`
     ),
   reasoning: z.string().describe('The reasoning behind the predicted crash point.'),
 });
@@ -76,3 +76,4 @@ const predictCrashPointFlow = ai.defineFlow(
     return output!;
   }
 );
+
