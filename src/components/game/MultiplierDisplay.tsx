@@ -16,7 +16,7 @@ export function MultiplierDisplay({ gameState, multiplier, timer, crashedAt }: M
 
   switch (gameState) {
     case "IDLE":
-      displayText = `Next round in ${timer}s`;
+      displayText = "Waiting for Next Round";
       textColorClass = "text-muted-foreground";
       break;
     case "BETTING":
@@ -42,6 +42,8 @@ export function MultiplierDisplay({ gameState, multiplier, timer, crashedAt }: M
   }
 
   const isNumericDisplay = gameState === "RUNNING" || gameState === "CRASHED" || gameState === "ENDED";
+  const isInformationalText = gameState === "IDLE" || gameState === "BETTING" || gameState === "STARTING_ROUND";
+
 
   return (
     <div className={cn(
@@ -50,9 +52,10 @@ export function MultiplierDisplay({ gameState, multiplier, timer, crashedAt }: M
     )}>
       <div
         className={cn(
-          "font-mono font-bold transition-colors duration-300",
+          "font-mono font-bold transition-colors duration-300 text-center px-2",
           textColorClass,
-          isNumericDisplay ? "text-7xl md:text-8xl lg:text-9xl" : "text-3xl md:text-4xl"
+          isNumericDisplay ? "text-7xl md:text-8xl lg:text-9xl" : "text-3xl md:text-4xl",
+          isInformationalText && "leading-tight" // Ensure text wraps nicely if needed
         )}
       >
         {displayText}
