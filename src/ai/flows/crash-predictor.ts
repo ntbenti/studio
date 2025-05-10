@@ -59,10 +59,7 @@ The average cashout multiplier from previous rounds is {{averageCashoutMultiplie
 
 Consider these factors to determine a crash point that is both plausible and exciting for the players.
 
-It is very important that the predictedCrashPoint is greater than 1.0.  It is also very important that you justify your reasoning in the reasoning field.  Your job is to create fun and exciting gameplay.
-
-Output:
-{{output hints=PredictCrashPointOutputSchema}}`,
+It is very important that the predictedCrashPoint is greater than 1.0.  It is also very important that you justify your reasoning in the reasoning field.  Your job is to create fun and exciting gameplay.`,
 });
 
 const predictCrashPointFlow = ai.defineFlow(
