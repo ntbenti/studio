@@ -1,0 +1,21 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow read and write access to the users collection.
+    // For development purposes, this allows all reads and writes.
+    // For production, you MUST restrict this further, typically to authenticated users
+    // and ensuring users can only modify their own data.
+    match /users/{userId} {
+      allow read, write: if true; // WARNING: Insecure for production.
+    }
+
+    // Example of more secure rules for production (once authentication is in place):
+    // match /users/{userId} {
+    //   allow read, write: if request.auth != null && request.auth.uid == userId;
+    // }
+
+    // Add other collection rules here as needed.
+  }
+}

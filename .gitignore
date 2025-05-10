@@ -3,12 +3,8 @@
 # dependencies
 /node_modules
 /.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+.pnp.js
+.yarn/install-state.gz
 
 # testing
 /coverage
@@ -28,18 +24,39 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
+
+# local env files
+.env.local
+.env.*.local
 
 # vercel
 .vercel
 
+# turbo
+.turbo
+
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+tsconfig.tsbuildinfo
 
-.genkit/*
-.env*
+# Rome
+.rome/
 
-# firebase
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# CMake
+cmake-build-*/
+
+# Crashlytics
+**/src/main/crashlytics.properties
+
+# Firebase
 firebase-debug.log
-firestore-debug.log
