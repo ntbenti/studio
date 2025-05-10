@@ -1,3 +1,4 @@
+
 "use client";
 
 import { cn } from '@/lib/utils';
@@ -15,10 +16,7 @@ export function MultiplierDisplay({ gameState, multiplier, timer, crashedAt }: M
   let textColorClass = "text-foreground"; // Default text color (white on dark theme)
 
   switch (gameState) {
-    case "IDLE":
-      displayText = "Waiting for Next Round";
-      textColorClass = "text-muted-foreground";
-      break;
+    // IDLE case removed
     case "BETTING":
       displayText = `Betting closes in ${timer}s`;
       textColorClass = "text-accent"; // Use accent for betting phase
@@ -37,12 +35,12 @@ export function MultiplierDisplay({ gameState, multiplier, timer, crashedAt }: M
       textColorClass = "text-destructive"; // Use destructive color for crash
       break;
     default:
-      displayText = "Loading...";
+      displayText = "Loading..."; // Should ideally not be hit if states are handled
       textColorClass = "text-muted-foreground";
   }
 
   const isNumericDisplay = gameState === "RUNNING" || gameState === "CRASHED" || gameState === "ENDED";
-  const isInformationalText = gameState === "IDLE" || gameState === "BETTING" || gameState === "STARTING_ROUND";
+  const isInformationalText = gameState === "BETTING" || gameState === "STARTING_ROUND";
 
 
   return (
@@ -63,3 +61,4 @@ export function MultiplierDisplay({ gameState, multiplier, timer, crashedAt }: M
     </div>
   );
 }
+

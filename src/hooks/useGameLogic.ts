@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -5,7 +6,6 @@ import type { GameStateType, Bet, GameHistoryItem, RoundData } from '@/lib/types
 import { predictCrashPoint, type PredictCrashPointInput } from '@/ai/flows/crash-predictor';
 import { useToast } from '@/hooks/use-toast';
 
-const IDLE_DURATION = 5; // seconds before betting starts
 const BETTING_DURATION = 7; // seconds
 const ROUND_END_PAUSE = 3; // seconds after crash before new round
 const MULTIPLIER_INCREMENT_INTERVAL = 100; // ms
@@ -17,9 +17,9 @@ const FASTER_MULTIPLIER_SPEED = 0.15;
 
 
 export function useGameLogic() {
-  const [gameState, setGameState] = useState<GameStateType>("IDLE");
+  const [gameState, setGameState] = useState<GameStateType>("BETTING"); // Initialize directly to BETTING
   const [currentMultiplier, setCurrentMultiplier] = useState(1.0);
-  const [timer, setTimer] = useState(IDLE_DURATION);
+  const [timer, setTimer] = useState(BETTING_DURATION); // Initialize timer for BETTING state
   const [predictedCrashPoint, setPredictedCrashPoint] = useState<number | null>(null);
   
   const [userBet, setUserBet] = useState<Bet | null>(null);
@@ -45,8 +45,8 @@ export function useGameLogic() {
     setIsProcessingBet(false);
     setIsProcessingCashOut(false);
     setHasPlacedBetThisRound(false);
-    setGameState("IDLE");
-    setTimer(IDLE_DURATION);
+    setGameState("BETTING"); // Go directly to betting
+    setTimer(BETTING_DURATION); // Set timer for betting
   }, []);
 
   // Game State Machine
@@ -54,14 +54,7 @@ export function useGameLogic() {
     if (gameLoopRef.current) clearTimeout(gameLoopRef.current);
 
     switch (gameState) {
-      case "IDLE":
-        if (timer > 0) {
-          gameLoopRef.current = setTimeout(() => setTimer(t => t - 1), 1000);
-        } else {
-          setGameState("BETTING");
-          setTimer(BETTING_DURATION);
-        }
-        break;
+      // IDLE state removed
       case "BETTING":
         if (timer > 0) {
           gameLoopRef.current = setTimeout(() => setTimer(t => t - 1), 1000);
@@ -70,31 +63,30 @@ export function useGameLogic() {
         }
         break;
       case "STARTING_ROUND":
-        // Fetch prediction from AI
         const fetchPrediction = async () => {
           try {
-            // Mock AI input for now
             const aiInput: PredictCrashPointInput = {
-              roundHistory: roundHistoryForAI.slice(-10), // Last 10 rounds
-              currentPot: (userBet?.amount || 0) * 5, // Mock pot based on user bet
-              averageCashoutMultiplier: 1.5, // Mock average
+              roundHistory: roundHistoryForAI.slice(-10), 
+              currentPot: (userBet?.amount || 0) * 5, 
+              averageCashoutMultiplier: gameHistory.length > 0 
+                ? gameHistory.reduce((acc, item) => acc + item.crashPoint, 0) / gameHistory.length 
+                : 2.0, // Default if no history
             };
             const predictionResult = await predictCrashPoint(aiInput);
             if (predictionResult.predictedCrashPoint > 1.0) {
               setPredictedCrashPoint(predictionResult.predictedCrashPoint);
             } else {
-              // Fallback if AI gives invalid prediction
-              setPredictedCrashPoint(Math.random() * 9 + 1.1); // Random between 1.1 and 10.1 to avoid extreme highs
-               toast({ title: "AI Warning", description: "AI prediction was invalid, using fallback.", variant: "destructive" });
+              const fallbackCrashPoint = parseFloat((Math.random() * 9 + 1.1).toFixed(2));
+              setPredictedCrashPoint(fallbackCrashPoint); 
+               toast({ title: "AI Warning", description: `AI prediction was invalid (${predictionResult.predictedCrashPoint.toFixed(2)}x), using fallback (${fallbackCrashPoint}x). Reason: ${predictionResult.reasoning}`, variant: "destructive", duration: 7000 });
             }
-            // console.log("AI Predicted Crash Point:", predictionResult.predictedCrashPoint, "Reasoning:", predictionResult.reasoning);
             setGameState("RUNNING");
           } catch (error) {
             console.error("Error fetching crash prediction:", error);
-            // Fallback to a random crash point if AI fails
-            setPredictedCrashPoint(Math.random() * 9 + 1.1); // Random between 1.1 and 10.1
+            const fallbackCrashPoint = parseFloat((Math.random() * 9 + 1.1).toFixed(2));
+            setPredictedCrashPoint(fallbackCrashPoint); 
             setGameState("RUNNING");
-            toast({ title: "AI Error", description: "Could not get AI prediction, using fallback.", variant: "destructive" });
+            toast({ title: "AI Error", description: `Could not get AI prediction, using fallback (${fallbackCrashPoint}x).`, variant: "destructive" });
           }
         };
         fetchPrediction();
@@ -104,31 +96,37 @@ export function useGameLogic() {
         break;
       case "CRASHED":
         gameLoopRef.current = setTimeout(() => {
-          const finalCrashPoint = predictedCrashPoint || currentMultiplier;
-          const newHistoryItem: GameHistoryItem = {
-            id: crypto.randomUUID(),
-            crashPoint: finalCrashPoint,
-            bet: userBet ? { ...userBet } : undefined, // Store a copy of the bet state for history
-            profit: 0,
-            timestamp: new Date().toISOString(),
-          };
+          const finalCrashPoint = predictedCrashPoint || currentMultiplier; // Should always be predictedCrashPoint
+          
+          let profit = 0;
+          let currentBetForHistory: Bet | undefined = undefined;
 
-          if (userBet) {
-            if (userBet.cashedOutAt && userBet.cashedOutAt <= finalCrashPoint) { // User cashed out successfully
-              newHistoryItem.profit = userBet.amount * userBet.cashedOutAt - userBet.amount;
-              // Balance was already reduced by userBet.amount when bet was placed.
-              // Add the full payout (stake + profit).
-              setBalance(prev => prev + (userBet.amount * userBet.cashedOutAt!));
-            } else { // User didn't cash out or cashed out too late (should not happen if UI disables cashout post-crash)
-              newHistoryItem.profit = -userBet.amount;
+          if (userBet && hasPlacedBetThisRound) { // Ensure bet was for the current round
+            currentBetForHistory = { ...userBet }; // Copy for history
+            if (userBet.cashedOutAt && userBet.cashedOutAt <= finalCrashPoint) { 
+              // User cashed out successfully
+              profit = (userBet.amount * userBet.cashedOutAt) - userBet.amount;
+              // Balance was already reduced at bet placement. Add the full payout.
+              setBalance(prev => parseFloat((prev + (userBet.amount * userBet.cashedOutAt!)).toFixed(2)));
+            } else { 
+              // User didn't cash out or cashed out too late / bet lost
+              profit = -userBet.amount;
               // Balance already reflects the loss of the stake. No further adjustment needed.
             }
           }
           
+          const newHistoryItem: GameHistoryItem = {
+            id: crypto.randomUUID(),
+            crashPoint: finalCrashPoint,
+            bet: currentBetForHistory, 
+            profit: profit,
+            timestamp: new Date().toISOString(),
+          };
+          
           setGameHistory(prev => [newHistoryItem, ...prev.slice(0, 19)]);
           setRoundHistoryForAI(prev => [{ finalMultiplier: newHistoryItem.crashPoint, timestamp: newHistoryItem.timestamp }, ...prev.slice(0,19)]);
           setGameState("ENDED");
-        }, 1000); // Brief pause to show "CRASHED"
+        }, 1000); 
         break;
       case "ENDED":
         gameLoopRef.current = setTimeout(() => {
@@ -139,7 +137,7 @@ export function useGameLogic() {
     return () => {
       if (gameLoopRef.current) clearTimeout(gameLoopRef.current);
     };
-  }, [gameState, timer, userBet, predictedCrashPoint, currentMultiplier, resetForNewRound, roundHistoryForAI, toast]);
+  }, [gameState, timer, userBet, predictedCrashPoint, currentMultiplier, resetForNewRound, roundHistoryForAI, toast, gameHistory, hasPlacedBetThisRound]);
 
   // Multiplier Increase Logic
   useEffect(() => {
@@ -151,7 +149,7 @@ export function useGameLogic() {
           if (prevMultiplier >= predictedCrashPoint) {
             if (multiplierIntervalRef.current) clearInterval(multiplierIntervalRef.current);
             setGameState("CRASHED");
-            return predictedCrashPoint; // Cap at crash point
+            return predictedCrashPoint; 
           }
           let speed = INITIAL_MULTIPLIER_SPEED;
           if (prevMultiplier >= FASTER_ACCELERATION_THRESHOLD) {
@@ -184,10 +182,9 @@ export function useGameLogic() {
     }
 
     setIsProcessingBet(true);
-    // Simulate API call for betting
     setTimeout(() => {
-      setUserBet({ amount }); // Set userBet without cashedOutAt initially
-      setBalance(prev => prev - amount); // Deduct bet amount from balance
+      setUserBet({ amount }); 
+      setBalance(prev => parseFloat((prev - amount).toFixed(2))); 
       setHasPlacedBetThisRound(true);
       setIsProcessingBet(false);
       toast({ title: "Bet Placed", description: `You wagered ${amount.toFixed(2)} ETH.` });
@@ -195,21 +192,20 @@ export function useGameLogic() {
   }, [gameState, betAmountInput, balance, hasPlacedBetThisRound, isProcessingBet, toast]);
 
   const handleCashOut = useCallback(() => {
-    if (gameState !== "RUNNING" || !userBet || userBet.cashedOutAt || isProcessingCashOut) return;
+    if (gameState !== "RUNNING" || !userBet || userBet.cashedOutAt || isProcessingCashOut || !hasPlacedBetThisRound) return;
 
     setIsProcessingCashOut(true);
-    // Simulate API call for cashing out
     setTimeout(() => {
       const cashedOutBet: Bet = { ...userBet, cashedOutAt: currentMultiplier };
-      setUserBet(cashedOutBet); // Update userBet to include cashedOutAt
+      setUserBet(cashedOutBet); 
       
-      const profit = cashedOutBet.amount * currentMultiplier - cashedOutBet.amount;
+      const winnings = parseFloat((cashedOutBet.amount * currentMultiplier).toFixed(2));
+      const profit = parseFloat((winnings - cashedOutBet.amount).toFixed(2));
       
       setIsProcessingCashOut(false);
-      toast({ title: "Cashed Out!", description: `You secured ${currentMultiplier.toFixed(2)}x! Winnings: ${ (cashedOutBet.amount * currentMultiplier).toFixed(2)} ETH (Profit: ${profit.toFixed(2)} ETH).`});
-      // Balance update will happen at round end (CRASHED state) to centralize logic and use final crash point for history.
+      toast({ title: "Cashed Out!", description: `You secured ${currentMultiplier.toFixed(2)}x! Winnings: ${winnings} ETH (Profit: ${profit} ETH).`});
     }, 500);
-  }, [gameState, userBet, currentMultiplier, isProcessingCashOut, toast]);
+  }, [gameState, userBet, currentMultiplier, isProcessingCashOut, toast, hasPlacedBetThisRound]);
 
   return {
     gameState,
@@ -226,9 +222,10 @@ export function useGameLogic() {
     hasPlacedBet: hasPlacedBetThisRound,
     
     handleCashOut,
-    canCashOut: !!userBet && !userBet.cashedOutAt && gameState === "RUNNING" && !isProcessingCashOut,
+    canCashOut: !!userBet && !userBet.cashedOutAt && gameState === "RUNNING" && !isProcessingCashOut && hasPlacedBetThisRound,
     isProcessingCashOut,
     
     gameHistory,
   };
 }
+
