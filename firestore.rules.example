@@ -1,0 +1,34 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // This rule allows any client to read and write to any document in the 'users' collection.
+    // WARNING: THIS IS INSECURE FOR PRODUCTION ENVIRONMENTS.
+    // It is provided for development and testing purposes to quickly get the application running
+    // by allowing the Firestore operations in `WalletConnectButton.tsx` and `useGameLogic.ts`.
+    //
+    // For a production application, you should implement proper authentication and
+    // authorization checks. For example, if using Firebase Authentication, you might
+    // restrict access based on the authenticated user's UID:
+    //
+    // match /users/{userId} {
+    //   allow read, write: if request.auth != null && request.auth.uid == userId;
+    // }
+    //
+    // However, the current application uses wallet addresses directly as document IDs,
+    // which may not align with Firebase Auth UIDs without additional mapping logic.
+    // For the MVP's current setup and to resolve the permission denied error during development,
+    // the following permissive rule can be used.
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // If your application uses other collections, you will need to add rules for them as well.
+    // Example for another collection:
+    // match /otherCollection/{documentId} {
+    //   allow read: if request.auth != null; // Allow authenticated users to read
+    //   allow write: if request.auth != null && request.auth.uid == resource.data.ownerId; // Allow write if owner
+    // }
+  }
+}
